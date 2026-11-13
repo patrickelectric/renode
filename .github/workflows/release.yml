@@ -1,0 +1,78 @@
+name: Release
+
+# Builds Renode portable packages (with the STM32H5 support from this branch)
+# and publishes them as a GitHub Release whenever a tag is pushed.
+#
+# Usage:
+#   git tag v1.0.0-h5 && git push origin v1.0.0-h5
+#
+# A workflow_dispatch trigger is also provided to test the build without
+# tagging; in that case the packages are only uploaded as workflow artifacts.
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'h5-*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-portable:
+    name: Build Linux portable packages
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake gcc g++ make pkg-config
+
+      - name: Build portable package
+        run: ./build.sh -t
+
+      - name: Build headless portable package
+        run: ./build.sh -t --no-gui
+
+      - name: List built packages
+        run: ls -la output/packages/
+
+      - name: Upload packages as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: renode-linux-portable
+          path: output/packages/renode-*.tar.gz
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: output/packages/renode-*.tar.gz
+          generate_release_notes: true
+          body: |
+            Renode built from the `H5` integration branch with STM32H563 /
+            Nucleo-H563ZI support (RCC, PWR, flash controller, USART with
+            prescaler, FDCAN, EXTI, Ethernet with LAN8742 PHY) and Synopsys
+            DWC EQOS fixes, validated by booting NuttX `nucleo-h563zi:netnsh`
+            and pinging between two emulated boards.
+
+            Packages:
+            - `renode-*.linux-portable.tar.gz` — portable build with GUI
+            - `renode-*.linux-portable-headless.tar.gz` — headless portable
+              build (use `renode --console`)
+
+            Unpack and run `./renode` (or `./renode-test` for the test runner).
